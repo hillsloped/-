@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Live Chat</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; }
+    body {
+      background: #000;
+      color: #fff;
+      font: 16px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      display: flex;
+      flex-direction: column;
+    }
+    #messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 18px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      overflow-wrap: anywhere;
+    }
+    .message { white-space: pre-wrap; }
+    #composer {
+      width: 100%;
+      border: 0;
+      border-top: 1px solid #333;
+      border-radius: 0;
+      outline: none;
+      resize: none;
+      min-height: 58px;
+      max-height: 30vh;
+      padding: 18px 16px;
+      background: #000;
+      color: #fff;
+      font: inherit;
+    }
+    #composer::placeholder { color: #888; }
+    #composer:focus { outline: none; }
+  </style>
+</head>
+<body>
+  <main id="messages" aria-live="polite" aria-label="Live messages"></main>
+  <textarea id="composer" rows="1" placeholder="Type a message…" aria-label="Type a message"></textarea>
+
+  <script type="module">
+    import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
+
+    const SUPABASE_URL = "https://hjezefwwradgurpbkcfr.supabase.co";
+    const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_Q7XxTFNOO0OTzpgodFmtjQ_4ga7p0MU";
+
+    const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
+    const messages = document.getElementById("messages");
+    const composer = document.getElementById("composer");
+
+    // A fresh identity is created on every page load; nothing is stored.
+    const clientId = crypto.randomUUID();
+    const channel = supabase.channel("one-room-live-chat", {
+      config: {
+        broadcast: { self: false, ack: false },
+        presence: { key: clientId }
+      }
+    });
+
+    let connected = false;
+    let otherPeople = 0;
+
+    function countOthers() {
+      const state = channel.presenceState();
+      otherPeople = Object.keys(state).filter(key => key !== clientId).length;
+    }
+
+    function showMessage(text) {
+      const line = document.createElement("div");
+      line.className = "message";
+      line.textContent = text;
+      messages.appendChild(line);
+      messages.scrollTop = messages.scrollHeight;
+    }
+
+    channel
+      .on("presence", { event: "sync" }, countOthers)
+      .on("broadcast", { event: "message" }, ({ payload }) => {
+        if (payload && typeof payload.text === "string") {
+          showMessage(payload.text);
+        }
+      })
+      .subscribe(async status => {
+        connected = status === "SUBSCRIBED";
+        if (connected) {
+          await channel.track({ online: true });
+          countOthers();
+        }
+      });
+
+    async function sendMessage() {
+      const text = composer.value.trim();
+      if (!text || !connected) return;
+
+      countOthers();
+      // Broadcasts are transient. If nobody else is present, nothing is sent.
+      if (otherPeople < 1) return;
+
+      const result = await channel.send({
+        type: "broadcast",
+        event: "message",
+        payload: { text }
+      });
+
+      if (result === "ok") {
+        composer.value = "";
+        composer.style.height = "auto";
+      }
+    }
+
+    composer.addEventListener("keydown", event => {
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        sendMessage();
+      }
+    });
+
+    composer.addEventListener("input", () => {
+      composer.style.height = "auto";
+      composer.style.height = Math.min(composer.scrollHeight, window.innerHeight * 0.3) + "px";
+    });
+
+    window.addEventListener("pagehide", () => {
+      channel.unsubscribe();
+    });
+  </script>
+</body>
+</html>
