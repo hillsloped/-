@@ -112,6 +112,8 @@
       });
 
       if (result === "ok") {
+        // Show the sender's own message locally; self-broadcast is disabled.
+        showMessage(text);
         composer.value = "";
         composer.style.height = "auto";
       }
